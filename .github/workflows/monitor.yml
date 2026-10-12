@@ -38,6 +38,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/transfers.jsonl || true
-          git diff --quiet --cached || git commit -m "Update data file"
-          git push || true
+          mkdir -p data
+          touch data/transfers.jsonl
+          git add -A
+          git diff --quiet --cached && exit 0
+          git commit -m "Update data file"
+          git push
