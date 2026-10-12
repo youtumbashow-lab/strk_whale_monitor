@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 STRK Whale Sale Monitor
-Мониторинг крупных переводов STRK с отправкой email-уведомлений.
-Адаптирован для запуска через GitHub Actions.
-
-Отправляет ОДНО сводное письмо со списком всех крупных переводов за запуск.
+Мониторинг крупных переводов STRK. Пишет найденные события в data/transfers.jsonl
+для последующей агрегации дневным скриптом daily_summary.py.
 """
 
 import json
 import smtplib
 import logging
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 
@@ -26,36 +26,34 @@ from config import (
     MAX_EVENTS_PER_RUN,
 )
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-DEBUG = False  # включите True для отладки структуры событий
+DEBUG = False
+
+# Файл-накопитель для дневной сводки
+DATA_FILE = Path("data/transfers.jsonl")
 
 
 def get_latest_block():
-    """Получение номера последнего блока в сети Starknet"""
     payload = {
         "jsonrpc": "2.0",
         "method": "starknet_blockNumber",
         "params": [],
         "id": 1
     }
-    response = requests.post(
-        STARKNET_RPC_URL,
-        json=payload,
-        headers={"Content-Type": "application/json"},
-        timeout=30
+    r = requests.post(
+        STARKNET_RPC_URL, json=payload,
+        headers={"Content-Type": "application/json"}, timeout=30
     )
-    response.raise_for_status()
-    return response.json()['result']
+    r.raise_for_status()
+    return r.json()['result']
 
 
 def get_transfer_events(from_block, to_block):
-    """Получение событий Transfer токена STRK с пагинацией."""
     all_events = []
     continuation_token = None
     pages = 0
@@ -78,15 +76,13 @@ def get_transfer_events(from_block, to_block):
             "params": {"filter": filter_params},
             "id": 1
         }
-        response = requests.post(
-            STARKNET_RPC_URL,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=60
+        r = requests.post(
+            STARKNET_RPC_URL, json=payload,
+            headers={"Content-Type": "application/json"}, timeout=60
         )
-        response.raise_for_status()
+        r.raise_for_status()
 
-        result = response.json().get('result', {})
+        result = r.json().get('result', {})
         events = result.get('events', [])
         all_events.extend(events)
 
@@ -94,7 +90,6 @@ def get_transfer_events(from_block, to_block):
         pages += 1
         if not continuation_token:
             break
-
         if len(all_events) >= MAX_EVENTS_PER_RUN:
             logger.warning(f"Достигнут лимит событий: {MAX_EVENTS_PER_RUN}")
             break
@@ -103,7 +98,6 @@ def get_transfer_events(from_block, to_block):
 
 
 def _to_int(value):
-    """Универсальное преобразование hex/int/str в int."""
     if isinstance(value, int):
         return value
     if isinstance(value, str):
@@ -112,12 +106,6 @@ def _to_int(value):
 
 
 def parse_transfer_event(event):
-    """
-    Парсинг события Transfer.
-    Формат Starknet ERC-20:
-      keys = [selector, from, to]
-      data = [amount_low, amount_high]
-    """
     try:
         keys = event.get('keys', [])
         data = event.get('data', [])
@@ -133,8 +121,6 @@ def parse_transfer_event(event):
             amount_low = _to_int(data[2])
             amount_high = _to_int(data[3])
         else:
-            if DEBUG:
-                logger.warning(f"Неизвестный формат: keys={keys}, data={data}")
             return None
 
         amount = amount_low + (amount_high << 128)
@@ -147,72 +133,47 @@ def parse_transfer_event(event):
             'block': event.get('block_number'),
             'tx_hash': event.get('transaction_hash')
         }
-    except (IndexError, ValueError, TypeError) as e:
-        if DEBUG:
-            logger.warning(f"Ошибка парсинга: {e}. event={event}")
+    except (IndexError, ValueError, TypeError):
         return None
 
 
-def send_email(subject, body):
-    """
-    Отправка email. Поддерживает порт 465 (SSL) и 587 (STARTTLS).
-    """
-    msg = MIMEMultipart()
-    msg['From'] = EMAIL_CONFIG['sender']
-    msg['To'] = EMAIL_CONFIG['recipient']
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+def append_to_data_file(transfers):
+    """Дописывает найденные крупные переводы в JSONL-файл."""
+    if not transfers:
+        return 0
 
-    host = EMAIL_CONFIG['smtp_host']
-    port = EMAIL_CONFIG['smtp_port']
-    user = EMAIL_CONFIG['sender']
-    pwd = EMAIL_CONFIG['password']
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=30) as server:
-                server.login(user, pwd)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(host, port, timeout=30) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(user, pwd)
-                server.send_message(msg)
-        logger.info(f"Email отправлен: {subject}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка отправки email: {e}")
-        return False
+    # Загружаем уже сохранённые tx_hash, чтобы не дублировать
+    existing_hashes = set()
+    if DATA_FILE.exists():
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    existing_hashes.add(json.loads(line)['tx_hash'])
+                except (json.JSONDecodeError, KeyError):
+                    continue
 
+    added = 0
+    with open(DATA_FILE, 'a', encoding='utf-8') as f:
+        for t in transfers:
+            if t['tx_hash'] in existing_hashes:
+                continue
+            record = {
+                'tx_hash': t['tx_hash'],
+                'amount_strk': t['amount_strk'],
+                'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+                'block': t['block'],
+            }
+            f.write(json.dumps(record) + '\n')
+            existing_hashes.add(t['tx_hash'])
+            added += 1
 
-def format_summary_email(transfers):
-    """Формирование текста сводного письма (без from/to/block)."""
-    total_strk = sum(t['amount_strk'] for t in transfers)
-    header = (
-        f"STRK Whale Monitor — обнаружено {len(transfers)} крупных переводов\n"
-        f"Суммарно: {total_strk:,.2f} STRK\n"
-        f"Время: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
-        f"{'-' * 60}\n\n"
-    )
-
-    # Сортируем по убыванию суммы
-    transfers_sorted = sorted(
-        transfers, key=lambda t: t['amount_strk'], reverse=True
-    )
-
-    lines = []
-    for i, t in enumerate(transfers_sorted, 1):
-        lines.append(
-            f"{i}. {t['amount_strk']:,.2f} STRK\n"
-            f"   https://starkscan.co/tx/{t['tx_hash']}\n"
-        )
-    return header + "\n".join(lines)
+    return added
 
 
 def main():
-    logger.info("Запуск STRK Whale Monitor (GitHub Actions mode)...")
+    logger.info("Запуск STRK Whale Monitor...")
 
     try:
         latest_block = get_latest_block()
@@ -221,8 +182,7 @@ def main():
         return
 
     from_block = max(0, latest_block - LOOKBACK_BLOCKS)
-    logger.info(f"Последний блок в сети: {latest_block}")
-    logger.info(f"Сканирование блоков {from_block} - {latest_block}")
+    logger.info(f"Блоки {from_block} — {latest_block}")
 
     try:
         events = get_transfer_events(from_block, latest_block)
@@ -232,42 +192,21 @@ def main():
 
     logger.info(f"Получено событий: {len(events)}")
 
-    if DEBUG and events:
-        logger.info(f"RAW [0]: {json.dumps(events[0])}")
-
     big_transfers = []
-    seen_hashes = set()
-    parsed_ok = 0
-    parsed_fail = 0
-
+    seen = set()
     for event in events:
-        tx_hash = event.get('transaction_hash')
-        if tx_hash in seen_hashes:
+        h = event.get('transaction_hash')
+        if h in seen:
             continue
-        seen_hashes.add(tx_hash)
+        seen.add(h)
+        t = parse_transfer_event(event)
+        if t and t['amount_strk'] >= MIN_AMOUNT_STRK:
+            big_transfers.append(t)
 
-        transfer = parse_transfer_event(event)
-        if not transfer:
-            parsed_fail += 1
-            continue
+    logger.info(f"Крупных переводов (≥{MIN_AMOUNT_STRK} STRK): {len(big_transfers)}")
 
-        parsed_ok += 1
-
-        if transfer['amount_strk'] >= MIN_AMOUNT_STRK:
-            big_transfers.append(transfer)
-
-    logger.info(
-        f"Распарсено: {parsed_ok}, ошибок: {parsed_fail}, "
-        f"крупных переводов (≥{MIN_AMOUNT_STRK} STRK): {len(big_transfers)}"
-    )
-
-    if not big_transfers:
-        logger.info("Крупных переводов нет — email не отправляем")
-        return
-
-    subject = f"[STRK Whale] {len(big_transfers)} крупных переводов"
-    body = format_summary_email(big_transfers)
-    send_email(subject, body)
+    added = append_to_data_file(big_transfers)
+    logger.info(f"Записано новых записей в data/transfers.jsonl: {added}")
 
 
 if __name__ == "__main__":
