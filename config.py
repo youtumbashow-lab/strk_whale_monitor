@@ -29,10 +29,9 @@ LOOKBACK_BLOCKS = 300
 MAX_EVENTS_PER_RUN = 5000
 
 # ==================== Email (SMTP) ====================
-# ВСЕ значения берутся из переменных окружения!
 EMAIL_CONFIG = {
     "smtp_host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
-    # 465 = SSL (рекомендую для GitHub Actions), 587 = STARTTLS
+    # 465 = SSL, 587 = STARTTLS. Для GitHub Actions 465 работает стабильнее.
     "smtp_port": int(os.getenv("SMTP_PORT", "465")),
     "sender": os.getenv("SMTP_SENDER"),
     "password": os.getenv("SMTP_PASSWORD"),
