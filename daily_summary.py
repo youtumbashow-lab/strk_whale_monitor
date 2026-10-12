@@ -82,9 +82,9 @@ def load_and_clear():
             except json.JSONDecodeError:
                 continue
 
-    # Очищаем файл
+    # Очищаем файл (создаём, если его нет)
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
     DATA_FILE.write_text('', encoding='utf-8')
-    return records
 
 
 def build_summary_body(records):
