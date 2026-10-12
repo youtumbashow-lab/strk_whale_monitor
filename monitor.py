@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
 STRK Whale Sale Monitor
-Мониторинг крупных переводов STRK с отправкой email-уведомлений
+Мониторинг крупных переводов STRK с отправкой email-уведомлений.
+Адаптирован для запуска через GitHub Actions.
 """
 
-import json
 import smtplib
 import logging
-import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
-from pathlib import Path
 
 import requests
 
@@ -20,8 +18,9 @@ from config import (
     STRK_TOKEN_ADDRESS,
     MIN_AMOUNT_STRK,
     EMAIL_CONFIG,
-    STATE_FILE,
-    TRANSFER_SELECTOR
+    TRANSFER_SELECTOR,
+    LOOKBACK_BLOCKS,
+    MAX_EVENTS_PER_RUN,
 )
 
 # Настройка логирования
@@ -30,21 +29,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-def load_last_block():
-    """Загрузка последнего обработанного блока"""
-    if Path(STATE_FILE).exists():
-        with open(STATE_FILE, 'r') as f:
-            data = json.load(f)
-            return data.get('last_block', 0)
-    return 0
-
-
-def save_last_block(block_number):
-    """Сохранение последнего обработанного блока"""
-    with open(STATE_FILE, 'w') as f:
-        json.dump({'last_block': block_number}, f)
 
 
 def get_latest_block():
@@ -68,12 +52,14 @@ def get_latest_block():
 
 def get_transfer_events(from_block, to_block):
     """
-    Получение событий Transfer для токена STRK
+    Получение событий Transfer для токена STRK с пагинацией.
     """
     all_events = []
     continuation_token = None
+    pages = 0
+    max_pages = 20  # защита от бесконечного цикла
 
-    while True:
+    while pages < max_pages:
         filter_params = {
             "from_block": {"block_number": from_block},
             "to_block": {"block_number": to_block},
@@ -105,7 +91,14 @@ def get_transfer_events(from_block, to_block):
         all_events.extend(events)
 
         continuation_token = result.get('continuation_token')
+        pages += 1
+
         if not continuation_token:
+            break
+
+        # Ограничение на количество событий для защиты от переполнения
+        if len(all_events) >= MAX_EVENTS_PER_RUN:
+            logger.warning(f"Достигнут лимит событий: {MAX_EVENTS_PER_RUN}")
             break
 
     return all_events
@@ -113,8 +106,8 @@ def get_transfer_events(from_block, to_block):
 
 def parse_transfer_event(event):
     """
-    Парсинг события Transfer
-    Возвращает: from_address, to_address, amount
+    Парсинг события Transfer.
+    Возвращает: from_address, to_address, amount_strk, block, tx_hash
     """
     try:
         data = event.get('data', [])
@@ -126,7 +119,7 @@ def parse_transfer_event(event):
         from_addr = hex(int(data[0], 16)) if isinstance(data[0], str) else hex(data[0])
         to_addr = hex(int(data[1], 16)) if isinstance(data[1], str) else hex(data[1])
 
-        # amount - это u256, хранится как low + high * 2^128
+        # amount — это u256: low + (high << 128)
         amount_low = int(data[2], 16) if isinstance(data[2], str) else data[2]
         amount_high = int(data[3], 16) if isinstance(data[3], str) else data[3]
         amount = amount_low + (amount_high << 128)
@@ -175,65 +168,60 @@ def format_alert_message(transfer):
 Блок: {transfer['block']}
 Транзакция: https://starkscan.co/tx/{transfer['tx_hash']}
 
-Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Время: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
 """.strip()
 
 
 def main():
-    logger.info("Запуск STRK Whale Monitor...")
-
-    last_block = load_last_block()
-    latest_block = get_latest_block()
-
-    logger.info(f"Последний обработанный блок: {last_block}")
-    logger.info(f"Последний блок в сети: {latest_block}")
-
-    if last_block == 0:
-        # Первый запуск - начинаем с текущего блока
-        logger.info("Первый запуск, инициализация...")
-        save_last_block(latest_block)
-        return
-
-    if last_block >= latest_block:
-        logger.info("Нет новых блоков для обработки")
-        return
-
-    # Ограничиваем глубину сканирования (например, 1000 блоков за раз)
-    max_block_range = 1000
-    from_block = last_block
-    to_block = min(latest_block, last_block + max_block_range)
-
-    logger.info(f"Сканирование блоков {from_block} - {to_block}")
+    logger.info("Запуск STRK Whale Monitor (GitHub Actions mode)...")
 
     try:
-        events = get_transfer_events(from_block, to_block)
-        logger.info(f"Получено событий: {len(events)}")
-
-        alerts_sent = 0
-
-        for event in events:
-            transfer = parse_transfer_event(event)
-            if not transfer:
-                continue
-
-            # Фильтрация по минимальной сумме
-            if transfer['amount_strk'] >= MIN_AMOUNT_STRK:
-                logger.info(
-                    f"Крупный перевод: {transfer['amount_strk']:,.2f} STRK "
-                    f"от {transfer['from']}"
-                )
-
-                subject = f"[STRK Whale] {transfer['amount_strk']:,.0f} STRK"
-                body = format_alert_message(transfer)
-                send_email(subject, body)
-                alerts_sent += 1
-
-        save_last_block(to_block)
-        logger.info(f"Готово. Отправлено уведомлений: {alerts_sent}")
-
+        latest_block = get_latest_block()
     except Exception as e:
-        logger.error(f"Ошибка выполнения: {e}")
-        raise
+        logger.error(f"Не удалось получить номер блока: {e}")
+        return
+
+    # Сканируем последние LOOKBACK_BLOCKS блоков при каждом запуске.
+    # Это компенсирует задержки GitHub Actions и отсутствие персистентного состояния.
+    from_block = max(0, latest_block - LOOKBACK_BLOCKS)
+
+    logger.info(f"Последний блок в сети: {latest_block}")
+    logger.info(f"Сканирование блоков {from_block} - {latest_block}")
+
+    try:
+        events = get_transfer_events(from_block, latest_block)
+    except Exception as e:
+        logger.error(f"Ошибка получения событий: {e}")
+        return
+
+    logger.info(f"Получено событий: {len(events)}")
+
+    alerts_sent = 0
+    seen_hashes = set()  # дедупликация внутри одного запуска
+
+    for event in events:
+        tx_hash = event.get('transaction_hash')
+
+        if tx_hash in seen_hashes:
+            continue
+        seen_hashes.add(tx_hash)
+
+        transfer = parse_transfer_event(event)
+        if not transfer:
+            continue
+
+        if transfer['amount_strk'] >= MIN_AMOUNT_STRK:
+            logger.info(
+                f"Крупный перевод: {transfer['amount_strk']:,.2f} STRK "
+                f"от {transfer['from']}"
+            )
+
+            subject = f"[STRK Whale] {transfer['amount_strk']:,.0f} STRK"
+            body = format_alert_message(transfer)
+            send_email(subject, body)
+            alerts_sent += 1
+
+    logger.info(f"Готово. Отправлено уведомлений: {alerts_sent}")
 
 
 if __name__ == "__main__":
