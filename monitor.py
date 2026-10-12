@@ -5,6 +5,7 @@ STRK Whale Sale Monitor
 Адаптирован для запуска через GitHub Actions.
 """
 
+import json
 import smtplib
 import logging
 from email.mime.text import MIMEText
@@ -29,6 +30,11 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ==================== DEBUG ====================
+# Установите True, чтобы увидеть сырые события и результат парсинга.
+# После отладки верните False.
+DEBUG = True
 
 
 def get_latest_block():
@@ -57,7 +63,7 @@ def get_transfer_events(from_block, to_block):
     all_events = []
     continuation_token = None
     pages = 0
-    max_pages = 20  # защита от бесконечного цикла
+    max_pages = 20
 
     while pages < max_pages:
         filter_params = {
@@ -96,7 +102,6 @@ def get_transfer_events(from_block, to_block):
         if not continuation_token:
             break
 
-        # Ограничение на количество событий для защиты от переполнения
         if len(all_events) >= MAX_EVENTS_PER_RUN:
             logger.warning(f"Достигнут лимит событий: {MAX_EVENTS_PER_RUN}")
             break
@@ -104,24 +109,46 @@ def get_transfer_events(from_block, to_block):
     return all_events
 
 
+def _to_int(value):
+    """Универсальное преобразование hex/int/str в int."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value, 16) if value.startswith('0x') else int(value)
+    raise TypeError(f"Не могу преобразовать в int: {value!r}")
+
+
 def parse_transfer_event(event):
     """
     Парсинг события Transfer.
-    Возвращает: from_address, to_address, amount_strk, block, tx_hash
+    Starknet ERC-20 Transfer: keys=[selector, from, to], data=[amount_low, amount_high]
+    либо keys=[selector], data=[from, to, amount_low, amount_high].
     """
     try:
+        keys = event.get('keys', [])
         data = event.get('data', [])
 
-        if len(data) < 4:
+        # Попытка 1: стандартный ERC-20 layout Starknet:
+        # keys = [selector, from, to], data = [amount_low, amount_high]
+        if len(keys) >= 3 and len(data) >= 2:
+            from_addr = hex(_to_int(keys[1]))
+            to_addr = hex(_to_int(keys[2]))
+            amount_low = _to_int(data[0])
+            amount_high = _to_int(data[1])
+        # Попытка 2: альтернативный layout:
+        # keys = [selector], data = [from, to, amount_low, amount_high]
+        elif len(data) >= 4:
+            from_addr = hex(_to_int(data[0]))
+            to_addr = hex(_to_int(data[1]))
+            amount_low = _to_int(data[2])
+            amount_high = _to_int(data[3])
+        else:
+            if DEBUG:
+                logger.warning(
+                    f"Неизвестный формат события. keys={keys}, data={data}"
+                )
             return None
 
-        # В Starknet ERC20 Transfer: from, to, amount_low, amount_high
-        from_addr = hex(int(data[0], 16)) if isinstance(data[0], str) else hex(data[0])
-        to_addr = hex(int(data[1], 16)) if isinstance(data[1], str) else hex(data[1])
-
-        # amount — это u256: low + (high << 128)
-        amount_low = int(data[2], 16) if isinstance(data[2], str) else data[2]
-        amount_high = int(data[3], 16) if isinstance(data[3], str) else data[3]
         amount = amount_low + (amount_high << 128)
 
         return {
@@ -133,7 +160,8 @@ def parse_transfer_event(event):
             'tx_hash': event.get('transaction_hash')
         }
     except (IndexError, ValueError, TypeError) as e:
-        logger.warning(f"Ошибка парсинга события: {e}")
+        if DEBUG:
+            logger.warning(f"Ошибка парсинга события: {e}. event={event}")
         return None
 
 
@@ -181,8 +209,6 @@ def main():
         logger.error(f"Не удалось получить номер блока: {e}")
         return
 
-    # Сканируем последние LOOKBACK_BLOCKS блоков при каждом запуске.
-    # Это компенсирует задержки GitHub Actions и отсутствие персистентного состояния.
     from_block = max(0, latest_block - LOOKBACK_BLOCKS)
 
     logger.info(f"Последний блок в сети: {latest_block}")
@@ -196,8 +222,21 @@ def main():
 
     logger.info(f"Получено событий: {len(events)}")
 
+    # ---------- ОТЛАДКА ----------
+    if DEBUG and events:
+        logger.info(f"RAW событие [0]: {json.dumps(events[0])}")
+        if len(events) > 1:
+            logger.info(f"RAW событие [1]: {json.dumps(events[1])}")
+        # Покажем первые 5 распарсенных
+        for i, ev in enumerate(events[:5]):
+            parsed = parse_transfer_event(ev)
+            logger.info(f"PARSE [{i}]: {parsed}")
+    # -----------------------------
+
     alerts_sent = 0
-    seen_hashes = set()  # дедупликация внутри одного запуска
+    seen_hashes = set()
+    parsed_ok = 0
+    parsed_fail = 0
 
     for event in events:
         tx_hash = event.get('transaction_hash')
@@ -208,7 +247,10 @@ def main():
 
         transfer = parse_transfer_event(event)
         if not transfer:
+            parsed_fail += 1
             continue
+
+        parsed_ok += 1
 
         if transfer['amount_strk'] >= MIN_AMOUNT_STRK:
             logger.info(
@@ -221,7 +263,10 @@ def main():
             send_email(subject, body)
             alerts_sent += 1
 
-    logger.info(f"Готово. Отправлено уведомлений: {alerts_sent}")
+    logger.info(
+        f"Итог: распарсено={parsed_ok}, ошибок парсинга={parsed_fail}, "
+        f"уведомлений={alerts_sent}"
+    )
 
 
 if __name__ == "__main__":
