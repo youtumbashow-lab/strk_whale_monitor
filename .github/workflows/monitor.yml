@@ -1,0 +1,34 @@
+name: STRK Whale Monitor
+
+on:
+  schedule:
+    # Запуск каждые 5 минут. GitHub использует UTC.
+    # Помните: GitHub может задерживать запуск до 15 минут [citation:1].
+    - cron: '*/5 * * * *'
+  # Позволяет запустить вручную через вкладку Actions для теста
+  workflow_dispatch: 
+
+jobs:
+  check-whales:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          # Передаем секреты в скрипт
+          SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          # Важно: URL RPC тоже лучше спрятать в секреты
+          STARKNET_RPC_URL: ${{ secrets.STARKNET_RPC_URL }}
+        run: python monitor.py
