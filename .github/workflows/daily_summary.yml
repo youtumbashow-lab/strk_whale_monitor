@@ -1,0 +1,44 @@
+name: STRK Whale Daily Summary
+
+on:
+  schedule:
+    # 05:00 МСК = 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # нужно для git push обратно в репозиторий
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Важно: чтобы push работал, нужен токен с правами на запись
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run daily summary
+        env:
+          SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        run: python daily_summary.py
+
+      - name: Commit cleared data file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/transfers.jsonl
+          git diff --quiet --cached || git commit -m "Clear daily data file"
+          git push
