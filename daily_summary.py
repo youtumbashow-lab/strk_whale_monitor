@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 STRK Whale — дневная сводка.
-Читает data/transfers.jsonl, агрегирует за прошлые сутки, отправляет письмо
-с разбивкой по порогам, очищает файл.
+Читает data/transfers.jsonl, агрегирует по порогам, отправляет письмо,
+очищает файл (создаёт заново, если удалён).
 """
 
 import json
@@ -26,9 +26,9 @@ DATA_FILE = Path("data/transfers.jsonl")
 
 # Пороги для разбивки: (нижняя граница, подпись)
 THRESHOLDS = [
-    (1_000_000, "> 1,000,000 STRK"),
-    (500_000,   "> 500,000 STRK"),
-    (100_000,   "> 100,000 STRK"),
+    (1_000_000, "> 1 000 000 STRK"),
+    (500_000,   "> 500 000 STRK"),
+    (100_000,   "> 100 000 STRK"),
 ]
 
 
@@ -66,25 +66,25 @@ def send_email(subject, body):
 def load_and_clear():
     """
     Читает все записи из файла, возвращает их список и очищает файл.
-    Возвращаем ВСЁ, что накопилось — раз в сутки это и есть «за прошлый день».
+    Файл гарантированно создаётся заново даже если его не было.
     """
-    if not DATA_FILE.exists():
-        return []
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     records = []
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    if DATA_FILE.exists():
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
 
-    # Очищаем файл (создаём, если его нет)
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Очищаем / создаём заново
     DATA_FILE.write_text('', encoding='utf-8')
+    return records
 
 
 def build_summary_body(records):
@@ -94,7 +94,7 @@ def build_summary_body(records):
     total = len(records)
     total_strk = sum(r['amount_strk'] for r in records)
 
-    # Разбивка по порогам (каждый перевод попадает только в свой высший порог)
+    # Каждый перевод попадает только в свой высший порог
     buckets = Counter()
     for r in records:
         amount = r['amount_strk']
@@ -102,17 +102,14 @@ def build_summary_body(records):
             if amount >= threshold:
                 buckets[threshold] += 1
                 break
-        else:
-            # меньше минимального порога — не считаем (не должно быть)
-            pass
 
     lines = [
-        f"STRK Whale — дневная сводка",
+        "STRK Whale — дневная сводка",
         f"Отчёт за: {now_msk.strftime('%Y-%m-%d %H:%M')} МСК",
-        f"",
+        "",
         f"Всего крупных переводов: {total}",
         f"Общая сумма: {total_strk:,.2f} STRK",
-        f"",
+        "",
         "-" * 50,
         "Разбивка по порогам:",
     ]
@@ -136,7 +133,7 @@ def main():
         return
 
     body = build_summary_body(records)
-    subject = f"[STRK Whale] Дневная сводка"
+    subject = "[STRK Whale] Дневная сводка"
     send_email(subject, body)
 
 
