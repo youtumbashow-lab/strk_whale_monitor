@@ -35,9 +35,9 @@ EMAIL_CONFIG = {
     # Настройка: https://myaccount.google.com/apppasswords
     "smtp_host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
     "smtp_port": int(os.getenv("SMTP_PORT", "587")),
-    "sender": os.getenv("SMTP_SENDER", "your_email@gmail.com"),
-    "password": os.getenv("SMTP_PASSWORD", "your_app_password"),
-    "recipient": os.getenv("ALERT_EMAIL", "recipient@example.com"),
+    "sender": os.getenv("SMTP_SENDER", "youtumbashow@gmail.com"),
+    "password": os.getenv("SMTP_PASSWORD", "uyar uhbl hlki ghmk"),
+    "recipient": os.getenv("ALERT_EMAIL", "leoleokor@gmail.com"),
 }
 
 # ==================== Состояние ====================
