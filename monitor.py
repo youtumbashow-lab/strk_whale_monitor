@@ -170,12 +170,10 @@ def send_email(subject, body):
 
     try:
         if port == 465:
-            # SSL с самого начала
             with smtplib.SMTP_SSL(host, port, timeout=30) as server:
                 server.login(user, pwd)
                 server.send_message(msg)
         else:
-            # STARTTLS
             with smtplib.SMTP(host, port, timeout=30) as server:
                 server.ehlo()
                 server.starttls()
@@ -189,28 +187,26 @@ def send_email(subject, body):
         return False
 
 
-def format_summary_email(transfers, from_block, to_block):
-    """Формирование текста сводного письма"""
+def format_summary_email(transfers):
+    """Формирование текста сводного письма (без from/to/block)."""
     total_strk = sum(t['amount_strk'] for t in transfers)
     header = (
         f"STRK Whale Monitor — обнаружено {len(transfers)} крупных переводов\n"
-        f"Диапазон блоков: {from_block} — {to_block}\n"
         f"Суммарно: {total_strk:,.2f} STRK\n"
         f"Время: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
         f"{'-' * 60}\n\n"
     )
 
     # Сортируем по убыванию суммы
-    transfers_sorted = sorted(transfers, key=lambda t: t['amount_strk'], reverse=True)
+    transfers_sorted = sorted(
+        transfers, key=lambda t: t['amount_strk'], reverse=True
+    )
 
     lines = []
     for i, t in enumerate(transfers_sorted, 1):
         lines.append(
-            f"{i}. {t['amount_strk']:>15,.2f} STRK\n"
-            f"   От:   {t['from']}\n"
-            f"   Кому: {t['to']}\n"
-            f"   Блок: {t['block']}\n"
-            f"   Тх:   https://starkscan.co/tx/{t['tx_hash']}\n"
+            f"{i}. {t['amount_strk']:,.2f} STRK\n"
+            f"   https://starkscan.co/tx/{t['tx_hash']}\n"
         )
     return header + "\n".join(lines)
 
@@ -239,7 +235,6 @@ def main():
     if DEBUG and events:
         logger.info(f"RAW [0]: {json.dumps(events[0])}")
 
-    # Собираем все крупные переводы
     big_transfers = []
     seen_hashes = set()
     parsed_ok = 0
@@ -266,13 +261,12 @@ def main():
         f"крупных переводов (≥{MIN_AMOUNT_STRK} STRK): {len(big_transfers)}"
     )
 
-    # Отправляем ОДНО сводное письмо, если есть что отправлять
     if not big_transfers:
         logger.info("Крупных переводов нет — email не отправляем")
         return
 
     subject = f"[STRK Whale] {len(big_transfers)} крупных переводов"
-    body = format_summary_email(big_transfers, from_block, latest_block)
+    body = format_summary_email(big_transfers)
     send_email(subject, body)
 
 
