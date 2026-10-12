@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Конфигурация STRK Whale Monitor
+Конфигурация STRK Whale Monitor.
+Все секреты берутся из переменных окружения (GitHub Secrets).
 """
 
 import os
@@ -9,7 +10,7 @@ import os
 # Бесплатные публичные RPC-эндпоинты Starknet
 STARKNET_RPC_URL = os.getenv(
     "STARKNET_RPC_URL",
-    "https://starknet.api.onfinality.io/public"  # Бесплатный публичный эндпоинт
+    "https://starknet.api.onfinality.io/public"
 )
 
 # Альтернативные бесплатные эндпоинты (раскомментируйте нужный):
@@ -19,7 +20,6 @@ STARKNET_RPC_URL = os.getenv(
 # STARKNET_RPC_URL = "https://free-rpc.nethermind.io/mainnet-juno/"
 
 # ==================== Токен STRK ====================
-# Адрес контракта токена STRK в сети Starknet
 STRK_TOKEN_ADDRESS = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d"
 
 # Selector для события Transfer (keccak256("Transfer"))
@@ -27,18 +27,29 @@ TRANSFER_SELECTOR = "0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6
 
 # ==================== Фильтр ====================
 # Минимальная сумма для оповещения (в STRK, не wei)
-MIN_AMOUNT_STRK = 100_000  # Например, 100,000 STRK
+MIN_AMOUNT_STRK = 100_000
+
+# Сколько последних блоков сканировать за один запуск (для GitHub Actions)
+LOOKBACK_BLOCKS = 200
+
+# Максимум событий за один запуск (защита от перегрузки)
+MAX_EVENTS_PER_RUN = 500
 
 # ==================== Email (SMTP) ====================
+# ВСЕ значения берутся из переменных окружения!
+# В GitHub Actions они передаются через secrets.
 EMAIL_CONFIG = {
-    # Для Gmail используйте пароль приложения, не основной пароль!
-    # Настройка: https://myaccount.google.com/apppasswords
     "smtp_host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
     "smtp_port": int(os.getenv("SMTP_PORT", "587")),
-    "sender": os.getenv("SMTP_SENDER", "youtumbashow@gmail.com"),
-    "password": os.getenv("SMTP_PASSWORD", "uyar uhbl hlki ghmk"),
-    "recipient": os.getenv("ALERT_EMAIL", "leoleokor@gmail.com"),
+    "sender": os.getenv("SMTP_SENDER"),        # обязательная переменная
+    "password": os.getenv("SMTP_PASSWORD"),    # обязательная переменная
+    "recipient": os.getenv("ALERT_EMAIL"),     # обязательная переменная
 }
 
-# ==================== Состояние ====================
-STATE_FILE = "last_block.json"
+# Проверка, что все обязательные переменные заданы
+_missing = [k for k, v in EMAIL_CONFIG.items() if k in ("sender", "password", "recipient") and not v]
+if _missing:
+    raise RuntimeError(
+        f"Не заданы переменные окружения для email: {_missing}. "
+        f"Проверьте secrets в GitHub Actions или переменные окружения локально."
+    )
