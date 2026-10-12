@@ -6,11 +6,7 @@ STRK Whale Sale Monitor
 """
 
 import json
-import smtplib
 import logging
-import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,7 +16,6 @@ from config import (
     STARKNET_RPC_URL,
     STRK_TOKEN_ADDRESS,
     MIN_AMOUNT_STRK,
-    EMAIL_CONFIG,
     TRANSFER_SELECTOR,
     LOOKBACK_BLOCKS,
     MAX_EVENTS_PER_RUN,
@@ -34,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 DEBUG = False
 
-# Файл-накопитель для дневной сводки
 DATA_FILE = Path("data/transfers.jsonl")
 
 
@@ -111,13 +105,9 @@ def parse_transfer_event(event):
         data = event.get('data', [])
 
         if len(keys) >= 3 and len(data) >= 2:
-            from_addr = hex(_to_int(keys[1]))
-            to_addr = hex(_to_int(keys[2]))
             amount_low = _to_int(data[0])
             amount_high = _to_int(data[1])
         elif len(data) >= 4:
-            from_addr = hex(_to_int(data[0]))
-            to_addr = hex(_to_int(data[1]))
             amount_low = _to_int(data[2])
             amount_high = _to_int(data[3])
         else:
@@ -126,9 +116,6 @@ def parse_transfer_event(event):
         amount = amount_low + (amount_high << 128)
 
         return {
-            'from': from_addr,
-            'to': to_addr,
-            'amount_wei': amount,
             'amount_strk': amount / 10**18,
             'block': event.get('block_number'),
             'tx_hash': event.get('transaction_hash')
@@ -139,16 +126,21 @@ def parse_transfer_event(event):
 
 def append_to_data_file(transfers):
     """Дописывает найденные крупные переводы в JSONL-файл."""
-    if not transfers:
-        return 0
-
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Загружаем уже сохранённые tx_hash, чтобы не дублировать
+    if not transfers:
+        # Гарантируем, что файл существует даже если нечего писать
+        if not DATA_FILE.exists():
+            DATA_FILE.touch()
+        return 0
+
     existing_hashes = set()
     if DATA_FILE.exists():
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
             for line in f:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
                     existing_hashes.add(json.loads(line)['tx_hash'])
                 except (json.JSONDecodeError, KeyError):
