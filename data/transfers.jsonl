@@ -58,3 +58,8 @@
 {"tx_hash": "0x7371c933eb3784a8eaaa9b5d0c17dc0ae46551006863d9071095cd3741a0ab8", "amount_strk": 1150783.0, "timestamp_utc": "2026-10-13T10:03:59.909510+00:00", "block": 16315120}
 {"tx_hash": "0x31e3446f92c67439126195445ef7d6f2265e1b24fdd6e7af0f54547b51f5d58", "amount_strk": 1016924.0, "timestamp_utc": "2026-10-13T10:03:59.909517+00:00", "block": 16315226}
 {"tx_hash": "0x4390915f98b1bd54fc19b97666636dafc1247fa645c782796fcdfb6ad4c18e", "amount_strk": 1889162.0, "timestamp_utc": "2026-10-13T10:03:59.909521+00:00", "block": 16315290}
+{"tx_hash": "0x5c9c03c8ecfa50aeaa38dcac2900fe5a8838ef98afb5065eb382d8334235305", "amount_strk": 1150783.0, "timestamp_utc": "2026-10-13T10:27:23.868990+00:00", "block": 16315922}
+{"tx_hash": "0x453a0b088611de61b0b39f30bce401da6d15e6c68bcbe003a6d08a9fd80d399", "amount_strk": 44999142.376, "timestamp_utc": "2026-10-13T10:27:23.869026+00:00", "block": 16315932}
+{"tx_hash": "0x1dd4802f0fb32d3fb0c6bc7dbf0491e2ce37d865c2d003e26da53982dbab6f4", "amount_strk": 1016924.0, "timestamp_utc": "2026-10-13T10:27:23.869042+00:00", "block": 16315989}
+{"tx_hash": "0x239d284d58af24909f167724699836d4ebbfcdb08dd052798049f7ea03c84b7", "amount_strk": 522141.0, "timestamp_utc": "2026-10-13T10:27:23.869050+00:00", "block": 16315995}
+{"tx_hash": "0x364f711d38cc18941b115acaba14c35899952de754d251ae03abdf2232864ed", "amount_strk": 1889162.0, "timestamp_utc": "2026-10-13T10:27:23.869056+00:00", "block": 16316093}
