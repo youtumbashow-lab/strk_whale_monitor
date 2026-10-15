@@ -24,3 +24,4 @@
 {"tx_hash": "0x5ecb64bdd4ec49ffd24124ad4d5f7c6e995b7d94ad0f10dcbf503f41b49e732", "amount_strk": 2142199.0, "timestamp_utc": "2026-10-15T12:53:25.306750+00:00", "block": 16416162}
 {"tx_hash": "0xe5595a51e34e407296cd9463edf0b601401e6c381879a902d077c3deccf712", "amount_strk": 1952108.27693909, "timestamp_utc": "2026-10-15T13:33:02.670697+00:00", "block": 16417426}
 {"tx_hash": "0x657947423a150e88f3bacf529389d718c7a83fb11cf14b9d24415e63dd0a10a", "amount_strk": 785191.99, "timestamp_utc": "2026-10-15T13:33:02.670733+00:00", "block": 16417468}
+{"tx_hash": "0x38e468e72a7507fb5d9e8e7e991a4c2e39d1bcfb9bb6952e06b39d522fab503", "amount_strk": 2142199.0, "timestamp_utc": "2026-10-15T14:13:53.632711+00:00", "block": 16418854}
