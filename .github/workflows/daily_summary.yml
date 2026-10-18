@@ -46,5 +46,15 @@ jobs:
           touch data/transfers.jsonl data/history.json
           git add -A
           git diff --quiet --cached && exit 0
-          git commit -m "Daily summary: clear transfers, update history"
-          git push
+          git commit -m "Update data files"
+          for i in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Push failed (attempt $i), pulling and retrying..."
+            git pull --rebase origin main || true
+            sleep 2
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
