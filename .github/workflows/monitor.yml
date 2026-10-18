@@ -34,13 +34,23 @@ jobs:
           STARKNET_RPC_URL: ${{ secrets.STARKNET_RPC_URL }}
         run: python monitor.py
 
-      - name: Commit updated data file
+      - name: Commit updated files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           mkdir -p data
-          touch data/transfers.jsonl
+          touch data/transfers.jsonl data/history.json
           git add -A
           git diff --quiet --cached && exit 0
-          git commit -m "Update data file"
-          git push
+          git commit -m "Update data files"
+          for i in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Push failed (attempt $i), pulling and retrying..."
+            git pull --rebase origin main || true
+            sleep 2
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
