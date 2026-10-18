@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-STRK Whale Sale Monitor
-Мониторинг крупных переводов STRK. Пишет найденные события в data/transfers.jsonl
-для последующей агрегации дневным скриптом daily_summary.py.
+STRK Whale Monitor
+Сканирует блокчейн Starknet, находит крупные переводы STRK
+и записывает их в data/transfers.jsonl.
+Email НЕ отправляет — это делает daily_summary.py раз в день.
 """
 
 import json
@@ -26,8 +27,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-DEBUG = False
 
 DATA_FILE = Path("data/transfers.jsonl")
 
@@ -129,7 +128,6 @@ def append_to_data_file(transfers):
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     if not transfers:
-        # Гарантируем, что файл существует даже если нечего писать
         if not DATA_FILE.exists():
             DATA_FILE.touch()
         return 0
