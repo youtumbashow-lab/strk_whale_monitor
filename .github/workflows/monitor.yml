@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: strk-data-file
+  cancel-in-progress: false
+
 jobs:
   check-whales:
     runs-on: ubuntu-latest
@@ -27,11 +31,7 @@ jobs:
 
       - name: Run monitor
         env:
-          SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
           STARKNET_RPC_URL: ${{ secrets.STARKNET_RPC_URL }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
         run: python monitor.py
 
       - name: Commit updated data file
