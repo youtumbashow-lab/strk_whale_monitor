@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 STRK Whale — дневная сводка с историей.
-Читает data/transfers.jsonl за прошедшие сутки, агрегирует по порогам,
-дописывает новую строку в data/history.json (в начало), отправляет
-письмо с таблицей: первая строка — вчера, ниже — предыдущие дни.
+Группирует переводы из data/transfers.jsonl по датам (МСК),
+дописывает/обновляет записи в data/history.json,
+отправляет письмо с таблицей: новые даты сверху.
 """
 
 import json
@@ -13,7 +13,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from collections import Counter
+from collections import Counter, defaultdict
 
 from config import EMAIL_CONFIG
 
@@ -33,8 +33,8 @@ THRESHOLDS = [
     (100_000,   "> 100K"),
 ]
 
-# Сколько дней истории хранить и показывать в таблице
 HISTORY_DAYS = 30
+MSK = timezone(timedelta(hours=3))
 
 
 def send_email(subject, body):
@@ -89,7 +89,6 @@ def load_and_clear_transfers():
 
 
 def load_history():
-    """Загружает историю из history.json. Возвращает список записей (новые первыми)."""
     if not HISTORY_FILE.exists():
         return []
     try:
@@ -102,57 +101,90 @@ def load_history():
 
 
 def save_history(history):
-    """Сохраняет историю в history.json."""
     HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 
-def aggregate(records):
-    """Считает количество переводов по порогам и общую сумму."""
-    total = len(records)
-    total_strk = sum(r['amount_strk'] for r in records)
+def record_date_msk(record):
+    """Извлекает дату записи в МСК (YYYY-MM-DD)."""
+    ts = record.get('timestamp_utc')
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        return dt.astimezone(MSK).strftime('%Y-%m-%d')
+    except (ValueError, TypeError):
+        return None
 
-    # Каждый перевод попадает только в свой высший порог
-    buckets = Counter()
+
+def aggregate_by_date(records):
+    """Группирует записи по датам (МСК) и считает агрегаты по каждой."""
+    by_date = defaultdict(list)
     for r in records:
-        amount = r['amount_strk']
-        for threshold, _ in THRESHOLDS:
-            if amount >= threshold:
-                buckets[threshold] += 1
-                break
+        d = record_date_msk(r)
+        if d:
+            by_date[d].append(r)
 
-    return {
-        'total': total,
-        'total_strk': total_strk,
-        'buckets': {threshold: buckets.get(threshold, 0) for threshold, _ in THRESHOLDS},
-    }
+    result = {}
+    for date, recs in by_date.items():
+        total = len(recs)
+        total_strk = sum(r['amount_strk'] for r in recs)
+
+        buckets = Counter()
+        for r in recs:
+            amount = r['amount_strk']
+            for threshold, _ in THRESHOLDS:
+                if amount >= threshold:
+                    buckets[threshold] += 1
+                    break
+
+        result[date] = {
+            'date': date,
+            'total': total,
+            'total_strk': total_strk,
+            'buckets': {str(t): buckets.get(t, 0) for t, _ in THRESHOLDS},
+        }
+    return result
+
+
+def merge_into_history(history, new_days):
+    """
+    Объединяет новые агрегаты с историей:
+    - существующая дата → прибавляем значения
+    - новая дата → добавляем
+    - сортируем по дате, новые сверху
+    """
+    existing = {entry['date']: entry for entry in history}
+
+    for date, new_entry in new_days.items():
+        if date in existing:
+            old = existing[date]
+            old['total'] += new_entry['total']
+            old['total_strk'] += new_entry['total_strk']
+            for k, v in new_entry['buckets'].items():
+                old['buckets'][k] = old['buckets'].get(k, 0) + v
+        else:
+            existing[date] = new_entry
+
+    merged = sorted(existing.values(), key=lambda e: e['date'], reverse=True)
+    return merged[:HISTORY_DAYS]
 
 
 def format_table(history):
-    """
-    Формирует текстовую таблицу.
-    Первая строка данных — последний день (вчера).
-    """
-    # Заголовок
     header_labels = ["Дата"] + [label for _, label in THRESHOLDS] + ["Всего", "Сумма STRK"]
-    # Ширины колонок
     widths = [12] + [10] * len(THRESHOLDS) + [8, 18]
 
     def fmt_row(cells):
-        parts = []
-        for i, cell in enumerate(cells):
-            parts.append(str(cell).ljust(widths[i]))
-        return " | ".join(parts)
+        return " | ".join(str(c).ljust(widths[i]) for i, c in enumerate(cells))
 
-    lines = []
-    lines.append(fmt_row(header_labels))
+    lines = [fmt_row(header_labels)]
     lines.append("-+-".join("-" * w for w in widths))
 
     for entry in history:
         row = [entry['date']]
         for threshold, _ in THRESHOLDS:
-            row.append(str(entry['buckets'].get(str(threshold), entry['buckets'].get(threshold, 0))))
+            row.append(str(entry['buckets'].get(str(threshold), 0)))
         row.append(str(entry['total']))
         row.append(f"{entry['total_strk']:,.0f}")
         lines.append(fmt_row(row))
@@ -160,64 +192,44 @@ def format_table(history):
     return "\n".join(lines)
 
 
-def build_summary_body(new_entry, history):
-    msk_tz = timezone(timedelta(hours=3))
-    now_msk = datetime.now(msk_tz)
-
-    yest = new_entry['date']
-    yest_total = new_entry['total']
-    yest_strk = new_entry['total_strk']
-
+def build_summary_body(history, dates_added):
+    now_msk = datetime.now(MSK)
     header = (
         f"STRK Whale — дневная сводка\n"
         f"Отчёт за: {now_msk.strftime('%Y-%m-%d %H:%M')} МСК\n"
-        f"\n"
-        f"Вчера ({yest}): {yest_total} переводов на {yest_strk:,.2f} STRK\n"
+        f"Обновлены даты: {', '.join(dates_added) if dates_added else '—'}\n"
         f"\n"
         f"{'-' * 90}\n"
         f"История (новые сверху):\n"
         f"{'-' * 90}\n"
     )
-
     return header + format_table(history)
 
 
 def main():
     logger.info("Запуск дневной сводки STRK Whale...")
 
-    # 1. Забираем накопленные переводы и очищаем файл
     records = load_and_clear_transfers()
-    logger.info(f"Загружено записей за период: {len(records)}")
+    logger.info(f"Загружено записей: {len(records)}")
 
-    # 2. Агрегируем
-    agg = aggregate(records)
+    if not records:
+        logger.info("Записей нет — сводка не отправляется")
+        # Всё равно обновим файлы (transfers.jsonl уже очищен)
+        return
 
-    # 3. Загружаем историю
+    new_days = aggregate_by_date(records)
+    logger.info(f"Дат в новых данных: {len(new_days)} → {sorted(new_days.keys(), reverse=True)}")
+
     history = load_history()
-    logger.info(f"В истории уже {len(history)} дней")
+    logger.info(f"В истории было {len(history)} дней")
 
-    # 4. Формируем новую запись с датой «вчера» в МСК
-    msk_tz = timezone(timedelta(hours=3))
-    yesterday_msk = (datetime.now(msk_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
+    history = merge_into_history(history, new_days)
+    logger.info(f"В истории стало {len(history)} дней")
 
-    new_entry = {
-        'date': yesterday_msk,
-        'total': agg['total'],
-        'total_strk': agg['total_strk'],
-        'buckets': {str(k): v for k, v in agg['buckets'].items()},
-    }
-
-    # 5. Добавляем в начало истории, обрезаем до HISTORY_DAYS
-    history.insert(0, new_entry)
-    history = history[:HISTORY_DAYS]
-
-    # 6. Сохраняем историю
     save_history(history)
-    logger.info(f"История обновлена: {len(history)} дней")
 
-    # 7. Отправляем письмо
-    body = build_summary_body(new_entry, history)
-    subject = f"[STRK Whale] Сводка за {yesterday_msk}"
+    body = build_summary_body(history, sorted(new_days.keys(), reverse=True))
+    subject = f"[STRK Whale] Сводка за {', '.join(sorted(new_days.keys(), reverse=True))}"
     send_email(subject, body)
 
 
