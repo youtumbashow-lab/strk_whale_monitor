@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-STRK Whale — дневная сводка.
-Читает data/transfers.jsonl, агрегирует по порогам, отправляет письмо,
-очищает файл (создаёт заново, если удалён).
+STRK Whale — дневная сводка с историей.
+Читает data/transfers.jsonl за прошедшие сутки, агрегирует по порогам,
+дописывает новую строку в data/history.json (в начало), отправляет
+письмо с таблицей: первая строка — вчера, ниже — предыдущие дни.
 """
 
 import json
@@ -23,13 +24,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DATA_FILE = Path("data/transfers.jsonl")
+HISTORY_FILE = Path("data/history.json")
 
-# Пороги для разбивки: (нижняя граница, подпись)
+# Пороги для разбивки: (нижняя граница, подпись для таблицы)
 THRESHOLDS = [
-    (1_000_000, "> 1 000 000 STRK"),
-    (500_000,   "> 500 000 STRK"),
-    (100_000,   "> 100 000 STRK"),
+    (1_000_000, "> 1M"),
+    (500_000,   "> 500K"),
+    (100_000,   "> 100K"),
 ]
+
+# Сколько дней истории хранить и показывать в таблице
+HISTORY_DAYS = 30
 
 
 def send_email(subject, body):
@@ -63,11 +68,8 @@ def send_email(subject, body):
         return False
 
 
-def load_and_clear():
-    """
-    Читает все записи из файла, возвращает их список и очищает файл.
-    Файл гарантированно создаётся заново даже если его не было.
-    """
+def load_and_clear_transfers():
+    """Читает все записи из transfers.jsonl и очищает файл."""
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     records = []
@@ -82,15 +84,32 @@ def load_and_clear():
                 except json.JSONDecodeError:
                     continue
 
-    # Очищаем / создаём заново
     DATA_FILE.write_text('', encoding='utf-8')
     return records
 
 
-def build_summary_body(records):
-    msk_tz = timezone(timedelta(hours=3))
-    now_msk = datetime.now(msk_tz)
+def load_history():
+    """Загружает историю из history.json. Возвращает список записей (новые первыми)."""
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        logger.warning("history.json повреждён — начинаем с пустой истории")
+        return []
 
+
+def save_history(history):
+    """Сохраняет историю в history.json."""
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def aggregate(records):
+    """Считает количество переводов по порогам и общую сумму."""
     total = len(records)
     total_strk = sum(r['amount_strk'] for r in records)
 
@@ -103,37 +122,102 @@ def build_summary_body(records):
                 buckets[threshold] += 1
                 break
 
-    lines = [
-        "STRK Whale — дневная сводка",
-        f"Отчёт за: {now_msk.strftime('%Y-%m-%d %H:%M')} МСК",
-        "",
-        f"Всего крупных переводов: {total}",
-        f"Общая сумма: {total_strk:,.2f} STRK",
-        "",
-        "-" * 50,
-        "Разбивка по порогам:",
-    ]
+    return {
+        'total': total,
+        'total_strk': total_strk,
+        'buckets': {threshold: buckets.get(threshold, 0) for threshold, _ in THRESHOLDS},
+    }
 
-    for threshold, label in THRESHOLDS:
-        count = buckets.get(threshold, 0)
-        lines.append(f"  {label}: {count} перевод(ов)")
 
-    lines.append("-" * 50)
+def format_table(history):
+    """
+    Формирует текстовую таблицу.
+    Первая строка данных — последний день (вчера).
+    """
+    # Заголовок
+    header_labels = ["Дата"] + [label for _, label in THRESHOLDS] + ["Всего", "Сумма STRK"]
+    # Ширины колонок
+    widths = [12] + [10] * len(THRESHOLDS) + [8, 18]
+
+    def fmt_row(cells):
+        parts = []
+        for i, cell in enumerate(cells):
+            parts.append(str(cell).ljust(widths[i]))
+        return " | ".join(parts)
+
+    lines = []
+    lines.append(fmt_row(header_labels))
+    lines.append("-+-".join("-" * w for w in widths))
+
+    for entry in history:
+        row = [entry['date']]
+        for threshold, _ in THRESHOLDS:
+            row.append(str(entry['buckets'].get(str(threshold), entry['buckets'].get(threshold, 0))))
+        row.append(str(entry['total']))
+        row.append(f"{entry['total_strk']:,.0f}")
+        lines.append(fmt_row(row))
+
     return "\n".join(lines)
+
+
+def build_summary_body(new_entry, history):
+    msk_tz = timezone(timedelta(hours=3))
+    now_msk = datetime.now(msk_tz)
+
+    yest = new_entry['date']
+    yest_total = new_entry['total']
+    yest_strk = new_entry['total_strk']
+
+    header = (
+        f"STRK Whale — дневная сводка\n"
+        f"Отчёт за: {now_msk.strftime('%Y-%m-%d %H:%M')} МСК\n"
+        f"\n"
+        f"Вчера ({yest}): {yest_total} переводов на {yest_strk:,.2f} STRK\n"
+        f"\n"
+        f"{'-' * 90}\n"
+        f"История (новые сверху):\n"
+        f"{'-' * 90}\n"
+    )
+
+    return header + format_table(history)
 
 
 def main():
     logger.info("Запуск дневной сводки STRK Whale...")
 
-    records = load_and_clear()
-    logger.info(f"Загружено записей: {len(records)}")
+    # 1. Забираем накопленные переводы и очищаем файл
+    records = load_and_clear_transfers()
+    logger.info(f"Загружено записей за период: {len(records)}")
 
-    if not records:
-        logger.info("Записей нет — письмо не отправляем")
-        return
+    # 2. Агрегируем
+    agg = aggregate(records)
 
-    body = build_summary_body(records)
-    subject = "[STRK Whale] Дневная сводка"
+    # 3. Загружаем историю
+    history = load_history()
+    logger.info(f"В истории уже {len(history)} дней")
+
+    # 4. Формируем новую запись с датой «вчера» в МСК
+    msk_tz = timezone(timedelta(hours=3))
+    yesterday_msk = (datetime.now(msk_tz) - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    new_entry = {
+        'date': yesterday_msk,
+        'total': agg['total'],
+        'total_strk': agg['total_strk'],
+        'buckets': {str(k): v for k, v in agg['buckets'].items()},
+    }
+
+    # 5. Добавляем в начало истории, обрезаем до HISTORY_DAYS
+    history.insert(0, new_entry)
+    history = history[:HISTORY_DAYS]
+
+    # 6. Сохраняем историю
+    save_history(history)
+    logger.info(f"История обновлена: {len(history)} дней")
+
+    # 7. Отправляем письмо
+    body = build_summary_body(new_entry, history)
+    subject = f"[STRK Whale] Сводка за {yesterday_msk}"
     send_email(subject, body)
 
 
