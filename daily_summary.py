@@ -209,12 +209,23 @@ def build_summary_body(history, dates_added):
 def main():
     logger.info("Запуск дневной сводки STRK Whale...")
 
+    # Проверка, что email-настройки заданы
+    missing = [
+        k for k in ("sender", "password", "recipient")
+        if not EMAIL_CONFIG.get(k)
+    ]
+    if missing:
+        logger.error(
+            f"Не заданы переменные окружения для email: {missing}. "
+            f"Проверьте secrets в GitHub Actions."
+        )
+        return
+
     records = load_and_clear_transfers()
     logger.info(f"Загружено записей: {len(records)}")
 
     if not records:
         logger.info("Записей нет — сводка не отправляется")
-        # Всё равно обновим файлы (transfers.jsonl уже очищен)
         return
 
     new_days = aggregate_by_date(records)
