@@ -20,7 +20,7 @@ TRANSFER_SELECTOR = "0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6
 
 # ==================== Фильтр ====================
 MIN_AMOUNT_STRK = 100_000
-LOOKBACK_BLOCKS = 300
+LOOKBACK_BLOCKS = 600
 MAX_EVENTS_PER_RUN = 5000
 
 # ==================== Email (SMTP) ====================
