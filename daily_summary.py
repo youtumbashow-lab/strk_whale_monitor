@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 DATA_FILE = Path("data/transfers.jsonl")
 HISTORY_FILE = Path("data/history.json")
 
-# Пороги для разбивки: (нижняя граница, подпись для таблицы)
 THRESHOLDS = [
     (1_000_000, "> 1M"),
     (500_000,   "> 500K"),
@@ -69,7 +68,6 @@ def send_email(subject, body):
 
 
 def load_and_clear_transfers():
-    """Читает все записи из transfers.jsonl и очищает файл."""
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     records = []
@@ -107,7 +105,6 @@ def save_history(history):
 
 
 def record_date_msk(record):
-    """Извлекает дату записи в МСК (YYYY-MM-DD)."""
     ts = record.get('timestamp_utc')
     if not ts:
         return None
@@ -119,7 +116,6 @@ def record_date_msk(record):
 
 
 def aggregate_by_date(records):
-    """Группирует записи по датам (МСК) и считает агрегаты по каждой."""
     by_date = defaultdict(list)
     for r in records:
         d = record_date_msk(r)
@@ -149,12 +145,6 @@ def aggregate_by_date(records):
 
 
 def merge_into_history(history, new_days):
-    """
-    Объединяет новые агрегаты с историей:
-    - существующая дата → прибавляем значения
-    - новая дата → добавляем
-    - сортируем по дате, новые сверху
-    """
     existing = {entry['date']: entry for entry in history}
 
     for date, new_entry in new_days.items():
@@ -209,7 +199,6 @@ def build_summary_body(history, dates_added):
 def main():
     logger.info("Запуск дневной сводки STRK Whale...")
 
-    # Проверка, что email-настройки заданы
     missing = [
         k for k in ("sender", "password", "recipient")
         if not EMAIL_CONFIG.get(k)
