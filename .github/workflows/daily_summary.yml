@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: strk-data-file
+  cancel-in-progress: false
+
 jobs:
   daily:
     runs-on: ubuntu-latest
@@ -34,13 +38,13 @@ jobs:
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
         run: python daily_summary.py
 
-      - name: Commit cleared data file
+      - name: Commit updated files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           mkdir -p data
-          touch data/transfers.jsonl
+          touch data/transfers.jsonl data/history.json
           git add -A
           git diff --quiet --cached && exit 0
-          git commit -m "Clear daily data file"
+          git commit -m "Daily summary: clear transfers, update history"
           git push
