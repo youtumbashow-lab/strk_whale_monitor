@@ -324,3 +324,13 @@
 {"tx_hash": "0x3257034f40be84d3eff0493cb6f467df79173c26ce710370cd32f37b309c27f", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T17:50:25.606146+00:00", "block": 16625544}
 {"tx_hash": "0x39fd2c671b94e73b5a2358307d9de0cca7c34cb8c80476f85e79c3577d87bd7", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T17:50:25.606151+00:00", "block": 16625616}
 {"tx_hash": "0x4f929e5b6341215515488f41d05abddf472ac537e117cd3fa47125dffd273f7", "amount_strk": 700120.0, "timestamp_utc": "2026-10-19T17:50:25.606155+00:00", "block": 16625622}
+{"tx_hash": "0x7269718cc0a557239d6fcf2cc85722a400341981ed8d42e55aa4a5a41d60e07", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T18:14:18.791287+00:00", "block": 16625856}
+{"tx_hash": "0x4b3f30e7eaa8fbb727e655054806aa71a9bfc56eae78a08bbf3e9dbf86f46f0", "amount_strk": 700120.0, "timestamp_utc": "2026-10-19T18:14:18.791322+00:00", "block": 16625862}
+{"tx_hash": "0x224110e6d284a426f96e6a97ecdb81504e3d8776751e7fadb0cdd94af93ae45", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T18:14:18.791331+00:00", "block": 16625889}
+{"tx_hash": "0x4fe13e462543d2fa73ee13de47059139a4aa17c3a0791bc2499493d35324773", "amount_strk": 700120.0, "timestamp_utc": "2026-10-19T18:14:18.791337+00:00", "block": 16625896}
+{"tx_hash": "0x4eba69e4d3f3e1a4b1686395c4f61e55ef5d50aba33db936e7e132f345b012c", "amount_strk": 719035.0, "timestamp_utc": "2026-10-19T18:14:18.791342+00:00", "block": 16625920}
+{"tx_hash": "0x7f664414fa6bdd856b80744186133afe161db94d06f6c64a76638eecf285a74", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T18:14:18.791348+00:00", "block": 16625924}
+{"tx_hash": "0x274be1773f1a4463c446e75147c4abcada6955cfab4cb1718d6b5d956305fb9", "amount_strk": 700120.0, "timestamp_utc": "2026-10-19T18:14:18.791353+00:00", "block": 16625930}
+{"tx_hash": "0x36229b205be687fd8a3dff3899ddea5cd21409004b722d8b2f038bba191e10e", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T18:14:18.791358+00:00", "block": 16626012}
+{"tx_hash": "0x737deeca3f6eab125573c336f9934b1578a2512b98395847bdaf003b33321c1", "amount_strk": 800010.0, "timestamp_utc": "2026-10-19T18:14:18.791362+00:00", "block": 16626154}
+{"tx_hash": "0x60d7fd26e4c6d48b4bd4f70aca3d45d5e667da0b28f6672ee368baa52851a2e", "amount_strk": 700120.0, "timestamp_utc": "2026-10-19T18:14:18.791367+00:00", "block": 16626161}
